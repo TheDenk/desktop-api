@@ -1,0 +1,31 @@
+[project]
+name = "desktop-api"
+version = "0.1.0"
+description = "Cross-platform desktop automation API for capturing windows and performing GUI actions"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  {name = "Denis Karachev", email = "welcomedenk@gmai.com"}
+]
+dependencies = [
+  "pyautogui>=0.9.54",
+  "pygetwindow>=0.0.9",
+  "mss>=9.0.1",
+  "Pillow>=10.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.3",
+  "ruff>=0.1"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
