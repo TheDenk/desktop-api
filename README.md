@@ -68,19 +68,17 @@ Every mouse method accepts a `relative_to` argument so you can provide coordinat
 `examples/demo.py` shows how to list windows, capture one, and perform a click. Run it with
 ```bash
 python examples/demo.py --window "Safari"
-```
+```  
 
-`examples/dummy_agent_loop.py` demonstrates an agent-style loop of capture → click → type → click → wait → capture. Customize the coordinates/text to match your UI:
+`examples/clicker.py` is a lightweight hotkey-based auto-clicker. Hold the configured key (default: `shift`) to emit clicks at the current cursor location; optionally supply `--toggle-hotkey` to flip continuous clicking on/off with a single press:
 ```bash
-python examples/dummy_agent_loop.py \
-  --window "Safari" \
-  --focus-click 120 320 \
-  --submit-click 480 620 \
-  --text "Hello from an agent" \
-  --iterations 3 \
-  --interval 2.0
-```
+python examples/clicker.py --cps 15 --hotkey shift --toggle-hotkey space
+```  
+
+`examples/dummy_agent_loop.py` demonstrates an agent-style loop of capture → click → type → click → wait → capture.  
 Replace the provided actions with calls into your AI agent (e.g., send every screenshot to a model, parse the response, and map its plan back to mouse/keyboard commands).
+
+Press Ctrl+C to quit at any time.
 
 ## Safety tips
 - Keep `fail_safe=True` (default) so moving the mouse to the top-left corner aborts automation
