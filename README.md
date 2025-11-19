@@ -70,7 +70,7 @@ Every mouse method accepts a `relative_to` argument so you can provide coordinat
 python examples/demo.py --window "Safari"
 ```  
 
-`examples/clicker.py` is a lightweight hotkey-based auto-clicker. Hold the configured key (default: `shift`) to emit clicks at the current cursor location; optionally supply `--toggle-hotkey` to flip continuous clicking on/off with a single press:
+`examples/clicker.py` is a lightweight hotkey-based auto-clicker (install `pynput` first: `pip install pynput`). Hold the configured key (default: `shift`) to emit clicks at the current cursor location; optionally supply `--toggle-hotkey` to flip continuous clicking on/off with a single press:
 ```bash
 python examples/clicker.py --cps 15 --hotkey shift --toggle-hotkey space
 ```  
