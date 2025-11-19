@@ -68,7 +68,6 @@ def main() -> int:
         print(exc)
         return 1
 
-    controller.activate_window(target_window)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

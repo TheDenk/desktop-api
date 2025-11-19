@@ -26,13 +26,17 @@ class DesktopController:
         exact: bool = False,
         case_sensitive: bool = False,
         min_title_length: int = 1,
+        activate: bool = True,
     ) -> WindowHandle:
-        return window.find_window(
+        handle = window.find_window(
             query,
             exact=exact,
             case_sensitive=case_sensitive,
             min_title_length=min_title_length,
         )
+        if activate:
+            return window.activate_window(handle)
+        return handle
 
     def activate_window(self, target: WindowHandle | str) -> WindowHandle:
         return window.activate_window(target)

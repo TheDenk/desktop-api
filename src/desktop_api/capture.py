@@ -1,12 +1,20 @@
 """Screenshot helpers."""
 from __future__ import annotations
 
+import sys
 from typing import Tuple
 
 import mss
 from PIL import Image
 
 from .window import WindowHandle, activate_window, refresh_window
+
+try:  # pragma: no cover - platform-specific
+    import Quartz
+except Exception:  # pragma: no cover - platform-specific
+    Quartz = None  # type: ignore[assignment]
+
+_IS_MAC = sys.platform == "darwin"
 
 Region = Tuple[int, int, int, int]
 
@@ -44,6 +52,16 @@ def capture_window(
     if padding < 0:
         raise ValueError("padding must be >= 0")
 
+    if (
+        _IS_MAC
+        and Quartz is not None
+        and window.platform == "mac"
+        and window.handle is not None
+        and padding == 0
+    ):
+        mac_image = _capture_window_macos(window)
+        return mac_image.convert("RGB")
+
     region = window.as_region()
     if padding:
         region["left"] -= padding
@@ -62,3 +80,40 @@ def _normalize_region(region: Region | dict[str, int]) -> Region:
         region["width"],
         region["height"],
     )
+
+
+def _capture_window_macos(window: WindowHandle) -> Image.Image:
+    if Quartz is None:  # pragma: no cover - platform-specific
+        raise RuntimeError("Quartz is required for macOS window capture")
+    if window.handle is None:
+        raise RuntimeError("Cannot capture macOS window without a handle")
+
+    image_ref = Quartz.CGWindowListCreateImage(
+        Quartz.CGRectNull,
+        Quartz.kCGWindowListOptionIncludingWindow,
+        window.handle,
+        Quartz.kCGWindowImageBoundsIgnoreFraming | Quartz.kCGWindowImageShouldBeOpaque,
+    )
+    if image_ref is None:
+        raise RuntimeError("Unable to capture window via Quartz")
+
+    width = Quartz.CGImageGetWidth(image_ref)
+    height = Quartz.CGImageGetHeight(image_ref)
+    if width == 0 or height == 0:
+        raise RuntimeError("Captured window has zero size")
+
+    data_provider = Quartz.CGImageGetDataProvider(image_ref)
+    data = Quartz.CGDataProviderCopyData(data_provider)
+    pixel_bytes = bytes(data)
+    bytes_per_row = Quartz.CGImageGetBytesPerRow(image_ref)
+
+    image = Image.frombuffer(
+        "RGBA",
+        (width, height),
+        pixel_bytes,
+        "raw",
+        "BGRA",
+        bytes_per_row,
+        1,
+    )
+    return image

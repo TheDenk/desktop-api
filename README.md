@@ -18,7 +18,10 @@ pip install -e .
 ```
 
 ### Platform requirements
-- **macOS**: Install the app via `pip`, then grant *Input Monitoring* and *Screen Recording* permissions when macOS prompts you.
+- **macOS**: Install the app via `pip`, then grant *Input Monitoring* and *Screen Recording* permissions when prompted. Window enumeration also needs PyObjC bindings:
+  ```bash
+  pip install pyobjc-core pyobjc-framework-Quartz pyobjc-framework-Cocoa
+  ```
 - **Windows**: No additional dependencies. Run the terminal as Administrator if the target app is elevated.
 - **Linux**: Requires X11 (Wayland is not supported by pyautogui yet). Install `scrot`, `python3-xlib`, and enable screen recording permissions if your desktop environment requires it.
 
@@ -29,8 +32,7 @@ from desktop_api import DesktopController, WindowNotFoundError
 controller = DesktopController(fail_safe=True, pause=0.1)
 
 try:
-    notes_window = controller.find_window("Notes")
-    controller.activate_window(notes_window)
+    notes_window = controller.find_window("Notes")  # auto-activates by default
 except WindowNotFoundError:
     raise SystemExit("Notes app must be opened")
 
@@ -50,9 +52,11 @@ controller.move_mouse(140, 200, relative_to=notes_window, duration=0.2)
 controller.mouse_up(140, 200, relative_to=notes_window)
 ```
 
+The controller automatically activates any window it finds so the UI is visible while your agent moves the cursor. Pass `activate=False` if you only need metadata.
+
 ## API overview
 - `DesktopController.list_windows()` – list visible windows with geometry metadata
-- `DesktopController.find_window(query)` – fuzzy-search by title (exact or substring)
+- `DesktopController.find_window(query, activate=True)` – fuzzy-search by title (exact or substring) and optionally bring it to the foreground
 - `DesktopController.capture_window(target, activate=False, padding=0)` – capture an app window as `PIL.Image`
 - `DesktopController.capture_screen(monitor=0)` and `capture_region((left, top, width, height))`
 - `DesktopController.mouse_down(...)`, `mouse_up(...)`, `click(...)`, `double_click(...)`, `drag(...)`, `scroll(...)`

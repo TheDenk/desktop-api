@@ -40,7 +40,6 @@ def main() -> int:
         print(exc)
         return 1
 
-    controller.activate_window(target_window)
     image = controller.capture_window(target_window)
 
     output_path = Path(args.output)
