@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         nargs=2,
         metavar=("X", "Y"),
-        default=(40, 40),
+        default=(100, 100),
         help="Relative coordinates to click inside the target window",
     )
     return parser.parse_args()
@@ -40,6 +40,8 @@ def main() -> int:
         print(exc)
         return 1
 
+    controller.activate_window(target_window)
+    controller.refresh_window(target_window)
     image = controller.capture_window(target_window)
 
     output_path = Path(args.output)
@@ -49,7 +51,7 @@ def main() -> int:
 
     rel_x, rel_y = args.relative_click
     controller.click(rel_x, rel_y, relative_to=target_window)
-    controller.type_text("Hello from desktop-api!\n")
+    # controller.type_text("Hello from desktop-api!\n")
     return 0
 
 
