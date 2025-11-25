@@ -2,11 +2,36 @@
 from __future__ import annotations
 
 import sys
+import importlib
 from dataclasses import dataclass
 from typing import Any, List
 
 import pyautogui
-import pygetwindow as gw
+
+try:  # pygetwindow raises at import time on unsupported platforms
+    import pygetwindow as gw  # type: ignore[import]
+except (ImportError, NotImplementedError):  # pragma: no cover - optional dependency
+    gw = None  # type: ignore[assignment]
+
+X = None
+Xatom = None
+xdisplay = None
+xerror = None
+protocol = None
+
+if sys.platform.startswith("linux"):  # pragma: no cover - platform-specific
+    try:
+        X = importlib.import_module("Xlib.X")
+        Xatom = importlib.import_module("Xlib.Xatom")
+        xdisplay = importlib.import_module("Xlib.display")
+        xerror = importlib.import_module("Xlib.error")
+        protocol = importlib.import_module("Xlib.protocol")
+    except Exception:
+        X = None  # type: ignore[assignment]
+        Xatom = None  # type: ignore[assignment]
+        xdisplay = None  # type: ignore[assignment]
+        xerror = None  # type: ignore[assignment]
+        protocol = None  # type: ignore[assignment]
 
 try:  # macOS-only dependencies
     import Quartz
@@ -25,7 +50,9 @@ except Exception:  # pragma: no cover - platform-specific
     NSWorkspace = None  # type: ignore[assignment]
 
 _IS_MAC = sys.platform == "darwin"
-_HAS_NATIVE_ENUM = hasattr(gw, "getAllWindows")
+_IS_LINUX = sys.platform.startswith("linux")
+_HAS_NATIVE_ENUM = bool(gw and hasattr(gw, "getAllWindows"))
+_LINUX_DISPLAY = None
 
 
 class WindowNotFoundError(RuntimeError):
@@ -70,10 +97,11 @@ def list_windows(min_title_length: int = 1) -> List[WindowHandle]:
         return _list_windows_via_pygetwindow(min_title_length)
     if _IS_MAC:
         return _list_windows_macos(min_title_length)
+    if _IS_LINUX:
+        return _list_windows_linux(min_title_length)
     raise RuntimeError(
-        "pygetwindow does not expose getAllWindows() on this platform. "
-        "Install the appropriate OS dependencies "
-        "(pyobjc for macOS) or upgrade pygetwindow."
+        "Window enumeration is not supported on this platform. "
+        "macOS requires pyobjc; Linux requires python-xlib/X11."
     )
 
 
@@ -104,11 +132,21 @@ def activate_window(target: WindowHandle | str) -> WindowHandle:
         window_obj.activate()
         return _to_handle(window_obj)
 
-    refreshed = _mac_resolve_window(target)
-    if refreshed is None:
-        raise WindowNotFoundError(str(target))
-    _mac_activate_pid(refreshed.pid)
-    return refresh_window(refreshed)
+    if _IS_MAC:
+        refreshed = _mac_resolve_window(target)
+        if refreshed is None:
+            raise WindowNotFoundError(str(target))
+        _mac_activate_pid(refreshed.pid)
+        return refresh_window(refreshed)
+
+    if _IS_LINUX:
+        refreshed = _linux_resolve_window(target)
+        if refreshed is None:
+            raise WindowNotFoundError(str(target))
+        _linux_activate_handle(refreshed.handle)
+        return refresh_window(refreshed)
+
+    raise RuntimeError("activate_window is not implemented on this platform.")
 
 
 def refresh_window(target: WindowHandle | str) -> WindowHandle:
@@ -120,10 +158,19 @@ def refresh_window(target: WindowHandle | str) -> WindowHandle:
             raise WindowNotFoundError(str(target))
         return _to_handle(window_obj)
 
-    refreshed = _mac_resolve_window(target)
-    if refreshed is None:
-        raise WindowNotFoundError(str(target))
-    return refreshed
+    if _IS_MAC:
+        refreshed = _mac_resolve_window(target)
+        if refreshed is None:
+            raise WindowNotFoundError(str(target))
+        return refreshed
+
+    if _IS_LINUX:
+        refreshed = _linux_resolve_window(target)
+        if refreshed is None:
+            raise WindowNotFoundError(str(target))
+        return refreshed
+
+    raise RuntimeError("refresh_window is not implemented on this platform.")
 
 
 def _list_windows_via_pygetwindow(min_title_length: int) -> List[WindowHandle]:
@@ -143,6 +190,14 @@ def _list_windows_via_pygetwindow(min_title_length: int) -> List[WindowHandle]:
 def _list_windows_macos(min_title_length: int) -> List[WindowHandle]:
     handles: List[WindowHandle] = []
     for snapshot in _iter_macos_windows():
+        if len(snapshot.title.strip()) >= min_title_length:
+            handles.append(snapshot)
+    return handles
+
+
+def _list_windows_linux(min_title_length: int) -> List[WindowHandle]:
+    handles: List[WindowHandle] = []
+    for snapshot in _iter_linux_windows():
         if len(snapshot.title.strip()) >= min_title_length:
             handles.append(snapshot)
     return handles
@@ -187,6 +242,247 @@ def _iter_macos_windows():
             handle=handle,
             platform="mac",
             pid=pid,
+        )
+
+
+def _iter_linux_windows():
+    _ensure_linux_support()
+    try:
+        disp = _linux_display()
+    except RuntimeError as exc:
+        raise RuntimeError(str(exc)) from exc
+    root = disp.screen().root
+    active_handle = _linux_active_window()
+
+    for window_id in _linux_client_list(disp, root):
+        snapshot = _linux_snapshot_window(disp, root, window_id, active_handle)
+        if snapshot is not None:
+            yield snapshot
+
+
+def _linux_client_list(disp, root):
+    candidate_atoms = (
+        "_NET_CLIENT_LIST_STACKING",
+        "_NET_CLIENT_LIST",
+    )
+    for atom_name in candidate_atoms:
+        atom = disp.intern_atom(atom_name, True)
+        if not atom:
+            continue
+        try:
+            prop = root.get_full_property(atom, Xatom.WINDOW)
+        except Exception:
+            continue
+        if prop and getattr(prop, "value", None):
+            values = list(prop.value)
+            if values:
+                return [int(window_id) for window_id in values]
+
+    try:
+        tree = root.query_tree()
+    except Exception:
+        return []
+    return [int(child.id) for child in tree.children]
+
+
+def _linux_snapshot_window(disp, root, window_id, active_handle):
+    try:
+        window = disp.create_resource_object("window", window_id)
+    except Exception:
+        return None
+
+    if not _linux_is_window_visible(window):
+        return None
+
+    title = _linux_window_title(disp, window)
+    if not title:
+        return None
+
+    geometry = _linux_window_geometry(window, root)
+    if geometry is None:
+        return None
+    left, top, width, height = geometry
+    if width <= 0 or height <= 0:
+        return None
+
+    return WindowHandle(
+        title=title,
+        left=left,
+        top=top,
+        width=width,
+        height=height,
+        is_active=(active_handle is not None and int(window_id) == int(active_handle)),
+        handle=int(window_id),
+        platform="linux",
+        pid=_linux_window_pid(disp, window),
+    )
+
+
+def _linux_window_title(disp, window) -> str:
+    atom_utf8 = disp.intern_atom("UTF8_STRING")
+    for atom_name in ("_NET_WM_NAME", "WM_NAME"):
+        atom = disp.intern_atom(atom_name, True)
+        if not atom:
+            continue
+        try:
+            target_type = atom_utf8 if atom_name == "_NET_WM_NAME" else Xatom.STRING
+            prop = window.get_full_property(atom, target_type)
+        except Exception:
+            continue
+        if prop and prop.value:
+            decoded = _linux_decode_property(prop.value)
+            decoded = decoded.strip()
+            if decoded:
+                return decoded
+    return ""
+
+
+def _linux_decode_property(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        try:
+            return bytes(value).decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+    if hasattr(value, "tolist"):
+        try:
+            data = bytes(value.tolist())
+            return data.decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+    return ""
+
+
+def _linux_window_geometry(window, root):
+    try:
+        geom = window.get_geometry()
+        _, abs_x, abs_y = window.translate_coords(root, 0, 0)
+    except Exception:
+        return None
+    return int(abs_x), int(abs_y), int(geom.width), int(geom.height)
+
+
+def _linux_window_pid(disp, window) -> int | None:
+    atom = disp.intern_atom("_NET_WM_PID", True)
+    if not atom:
+        return None
+    try:
+        prop = window.get_full_property(atom, Xatom.CARDINAL)
+    except Exception:
+        return None
+    if prop and prop.value:
+        try:
+            return int(prop.value[0])
+        except Exception:
+            return None
+    return None
+
+
+def _linux_is_window_visible(window) -> bool:
+    try:
+        attrs = window.get_attributes()
+    except Exception:
+        return False
+    if attrs.map_state != X.IsViewable:
+        return False
+    return True
+
+
+def _linux_resolve_window(target: WindowHandle | str) -> WindowHandle | None:
+    desired_handle = target.handle if isinstance(target, WindowHandle) else None
+    desired_title = target.title if isinstance(target, WindowHandle) else str(target)
+    normalized_title = desired_title.lower() if desired_title else None
+
+    candidates = _list_windows_linux(min_title_length=1)
+    if desired_handle is not None:
+        for candidate in candidates:
+            if candidate.handle == desired_handle:
+                return candidate
+
+    if normalized_title:
+        for candidate in candidates:
+            if candidate.title.lower() == normalized_title:
+                return candidate
+        for candidate in candidates:
+            if normalized_title in candidate.title.lower():
+                return candidate
+    return None
+
+
+def _linux_activate_handle(handle: int | None) -> None:
+    if handle is None:
+        return
+    try:
+        disp = _linux_display()
+    except RuntimeError:
+        return
+    if protocol is None or X is None:
+        return
+    root = disp.screen().root
+    window = disp.create_resource_object("window", handle)
+    atom = disp.intern_atom("_NET_ACTIVE_WINDOW", True)
+    if not atom:
+        return
+    event = protocol.event.ClientMessage(
+        window=window,
+        client_type=atom,
+        data=(32, [1, X.CurrentTime, handle, 0, 0]),
+    )
+    mask = X.SubstructureRedirectMask | X.SubstructureNotifyMask
+    try:
+        root.send_event(event, event_mask=mask)
+        disp.flush()
+    except Exception:
+        pass
+
+
+def _linux_active_window() -> int | None:
+    if not _IS_LINUX or xdisplay is None:
+        return None
+    try:
+        disp = _linux_display()
+    except RuntimeError:
+        return None
+    atom = disp.intern_atom("_NET_ACTIVE_WINDOW", True)
+    if not atom:
+        return None
+    root = disp.screen().root
+    try:
+        prop = root.get_full_property(atom, Xatom.WINDOW)
+    except Exception:
+        return None
+    if prop and prop.value:
+        try:
+            return int(prop.value[0])
+        except Exception:
+            return None
+    return None
+
+
+def _linux_display():
+    global _LINUX_DISPLAY
+    _ensure_linux_support()
+    if _LINUX_DISPLAY is None:
+        try:
+            _LINUX_DISPLAY = xdisplay.Display()  # type: ignore[call-arg]
+        except Exception as exc:
+            raise RuntimeError(
+                "Unable to connect to the X server. Ensure DISPLAY is set and "
+                "you are running under X11 or XWayland."
+            ) from exc
+    return _LINUX_DISPLAY
+
+
+def _ensure_linux_support() -> None:
+    if not _IS_LINUX:
+        raise RuntimeError("Linux window enumeration requested on a different platform.")
+    if xdisplay is None or X is None or Xatom is None or protocol is None:
+        raise RuntimeError(
+            "Linux window enumeration requires python-xlib (python3-xlib package) "
+            "and an X11 session."
         )
 
 
