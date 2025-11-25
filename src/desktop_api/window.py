@@ -437,22 +437,46 @@ def _linux_window_class(window) -> str:
 
 
 def _linux_window_geometry(window, root):
-    try:
-        geom = window.get_geometry()
-    except Exception:
-        return None
-    abs_x = geom.x
-    abs_y = geom.y
+    accumulated_x = 0
+    accumulated_y = 0
+    width = 0
+    height = 0
+    current = window
+    first = True
+    visited: set[int] = set()
+
+    while True:
+        wid = int(getattr(current, "id", 0))
+        if wid in visited:
+            break
+        visited.add(wid)
+        try:
+            geom = current.get_geometry()
+        except Exception:
+            return None
+        if first:
+            width = int(geom.width)
+            height = int(geom.height)
+            first = False
+        accumulated_x += int(geom.x)
+        accumulated_y += int(geom.y)
+        try:
+            tree = current.query_tree()
+        except Exception:
+            break
+        parent = tree.parent
+        if parent is None or parent.id == root.id:
+            break
+        current = parent
+
     try:
         _, abs_x, abs_y = window.translate_coords(root, 0, 0)
+        accumulated_x = int(abs_x)
+        accumulated_y = int(abs_y)
     except Exception:
-        try:
-            parent = window.query_tree().parent
-            if parent is not None:
-                _, abs_x, abs_y = window.translate_coords(parent, 0, 0)
-        except Exception:
-            pass
-    return int(abs_x), int(abs_y), int(geom.width), int(geom.height)
+        pass
+
+    return accumulated_x, accumulated_y, width, height
 
 
 def _linux_window_pid(disp, window) -> int | None:
