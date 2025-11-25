@@ -286,7 +286,7 @@ def _linux_client_list(disp, root):
 
 def _linux_collect_reparented_clients(root):
     collected: list[int] = []
-    visited: set[int] = set()
+    visited: set[int] = {int(root.id)}
     stack: list[Any] = [root]
 
     while stack:
@@ -300,27 +300,9 @@ def _linux_collect_reparented_clients(root):
             if child_id in visited:
                 continue
             visited.add(child_id)
-            if _linux_has_wm_state(child):
-                collected.append(child_id)
+            collected.append(child_id)
             stack.append(child)
     return collected
-
-
-def _linux_has_wm_state(window) -> bool:
-    display = getattr(window, "display", None)
-    if display is None:
-        return False
-    try:
-        atom = display.intern_atom("WM_STATE", True)
-    except Exception:
-        return False
-    if not atom:
-        return False
-    try:
-        prop = window.get_full_property(atom, X.AnyPropertyType if X else 0)
-    except Exception:
-        return False
-    return bool(prop and getattr(prop, "value", None))
 
 
 def _linux_snapshot_window(disp, root, window_id, active_handle):
@@ -357,13 +339,18 @@ def _linux_snapshot_window(disp, root, window_id, active_handle):
 
 
 def _linux_window_title(disp, window) -> str:
-    atom_utf8 = disp.intern_atom("UTF8_STRING")
-    for atom_name in ("_NET_WM_NAME", "WM_NAME"):
+    atom_utf8 = disp.intern_atom("UTF8_STRING", True)
+    name_atoms = ("_NET_WM_VISIBLE_NAME", "_NET_WM_NAME", "WM_NAME")
+
+    for atom_name in name_atoms:
         atom = disp.intern_atom(atom_name, True)
         if not atom:
             continue
         try:
-            target_type = atom_utf8 if atom_name == "_NET_WM_NAME" else Xatom.STRING
+            if atom_name == "WM_NAME":
+                target_type = Xatom.STRING
+            else:
+                target_type = atom_utf8 or Xatom.STRING
             prop = window.get_full_property(atom, target_type)
         except Exception:
             continue
@@ -372,6 +359,10 @@ def _linux_window_title(disp, window) -> str:
             decoded = decoded.strip()
             if decoded:
                 return decoded
+
+    fallback = _linux_fallback_wm_name(window)
+    if fallback:
+        return fallback
     return ""
 
 
@@ -392,6 +383,18 @@ def _linux_decode_property(value) -> str:
         except Exception:
             pass
     return ""
+
+
+def _linux_fallback_wm_name(window) -> str:
+    try:
+        name = window.get_wm_name()
+    except Exception:
+        return ""
+    if not name:
+        return ""
+    if isinstance(name, bytes):
+        return name.decode("utf-8", errors="ignore").strip()
+    return str(name).strip()
 
 
 def _linux_window_geometry(window, root):
