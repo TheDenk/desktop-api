@@ -276,13 +276,51 @@ def _linux_client_list(disp, root):
         if prop and getattr(prop, "value", None):
             values = list(prop.value)
             if values:
-                return [int(window_id) for window_id in values]
+                return list(dict.fromkeys(int(window_id) for window_id in values))
 
+    fallback = _linux_collect_reparented_clients(root)
+    if fallback:
+        return fallback
+    return []
+
+
+def _linux_collect_reparented_clients(root):
+    collected: list[int] = []
+    visited: set[int] = set()
+    stack: list[Any] = [root]
+
+    while stack:
+        window = stack.pop()
+        try:
+            children = window.query_tree().children
+        except Exception:
+            continue
+        for child in children:
+            child_id = int(child.id)
+            if child_id in visited:
+                continue
+            visited.add(child_id)
+            if _linux_has_wm_state(child):
+                collected.append(child_id)
+            stack.append(child)
+    return collected
+
+
+def _linux_has_wm_state(window) -> bool:
+    display = getattr(window, "display", None)
+    if display is None:
+        return False
     try:
-        tree = root.query_tree()
+        atom = display.intern_atom("WM_STATE", True)
     except Exception:
-        return []
-    return [int(child.id) for child in tree.children]
+        return False
+    if not atom:
+        return False
+    try:
+        prop = window.get_full_property(atom, Xatom.CARDINAL)
+    except Exception:
+        return False
+    return bool(prop and getattr(prop, "value", None))
 
 
 def _linux_snapshot_window(disp, root, window_id, active_handle):
