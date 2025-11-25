@@ -247,14 +247,15 @@ def _iter_macos_windows():
 
 def _iter_linux_windows():
     _ensure_linux_support()
-    try:
-        disp = _linux_display()
-    except RuntimeError as exc:
-        raise RuntimeError(str(exc)) from exc
+    disp = _linux_display()
     root = disp.screen().root
     active_handle = _linux_active_window()
 
-    for window_id in _linux_client_list(disp, root):
+    candidates = _linux_client_list(disp, root)
+    if not candidates:
+        candidates = _linux_collect_reparented_clients(root)
+
+    for window_id in candidates:
         snapshot = _linux_snapshot_window(disp, root, window_id, active_handle)
         if snapshot is not None:
             yield snapshot
@@ -464,10 +465,8 @@ def _linux_is_window_visible(window) -> bool:
     try:
         attrs = window.get_attributes()
     except Exception:
-        return False
-    if attrs.map_state != X.IsViewable:
-        return False
-    return True
+        return True
+    return attrs.map_state != getattr(X, "IsUnmapped", 0)
 
 
 def _linux_resolve_window(target: WindowHandle | str) -> WindowHandle | None:
