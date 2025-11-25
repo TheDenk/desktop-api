@@ -439,9 +439,19 @@ def _linux_window_class(window) -> str:
 def _linux_window_geometry(window, root):
     try:
         geom = window.get_geometry()
-        _, abs_x, abs_y = window.translate_coords(root, 0, 0)
     except Exception:
         return None
+    abs_x = geom.x
+    abs_y = geom.y
+    try:
+        _, abs_x, abs_y = window.translate_coords(root, 0, 0)
+    except Exception:
+        try:
+            parent = window.query_tree().parent
+            if parent is not None:
+                _, abs_x, abs_y = window.translate_coords(parent, 0, 0)
+        except Exception:
+            pass
     return int(abs_x), int(abs_y), int(geom.width), int(geom.height)
 
 
