@@ -464,8 +464,11 @@ def _linux_window_geometry(window, root):
             tree = current.query_tree()
         except Exception:
             break
-        parent = tree.parent
-        if parent is None or parent.id == root.id:
+        parent = getattr(tree, "parent", None)
+        if parent is None:
+            break
+        parent_id = int(getattr(parent, "id", 0))
+        if parent_id == int(getattr(root, "id", 0)):
             break
         current = parent
 
