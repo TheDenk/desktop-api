@@ -317,7 +317,7 @@ def _linux_has_wm_state(window) -> bool:
     if not atom:
         return False
     try:
-        prop = window.get_full_property(atom, Xatom.CARDINAL)
+        prop = window.get_full_property(atom, X.AnyPropertyType if X else 0)
     except Exception:
         return False
     return bool(prop and getattr(prop, "value", None))
