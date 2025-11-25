@@ -310,32 +310,48 @@ def _linux_snapshot_window(disp, root, window_id, active_handle):
         window = disp.create_resource_object("window", window_id)
     except Exception:
         return None
+    for candidate in _linux_iter_window_candidates(window):
+        if not _linux_is_window_visible(candidate):
+            continue
+        title = _linux_window_title(disp, candidate)
+        if not title:
+            continue
+        geometry = _linux_window_geometry(candidate, root)
+        if geometry is None:
+            continue
+        left, top, width, height = geometry
+        if width <= 1 or height <= 1:
+            continue
+        return WindowHandle(
+            title=title,
+            left=left,
+            top=top,
+            width=width,
+            height=height,
+            is_active=(active_handle is not None and int(candidate.id) == int(active_handle)),
+            handle=int(candidate.id),
+            platform="linux",
+            pid=_linux_window_pid(disp, candidate),
+        )
+    return None
 
-    if not _linux_is_window_visible(window):
-        return None
 
-    title = _linux_window_title(disp, window)
-    if not title:
-        return None
-
-    geometry = _linux_window_geometry(window, root)
-    if geometry is None:
-        return None
-    left, top, width, height = geometry
-    if width <= 0 or height <= 0:
-        return None
-
-    return WindowHandle(
-        title=title,
-        left=left,
-        top=top,
-        width=width,
-        height=height,
-        is_active=(active_handle is not None and int(window_id) == int(active_handle)),
-        handle=int(window_id),
-        platform="linux",
-        pid=_linux_window_pid(disp, window),
-    )
+def _linux_iter_window_candidates(window):
+    stack = [window]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        wid = int(getattr(current, "id", 0))
+        if wid in seen:
+            continue
+        seen.add(wid)
+        yield current
+        try:
+            children = current.query_tree().children
+        except Exception:
+            continue
+        for child in children or []:
+            stack.append(child)
 
 
 def _linux_window_title(disp, window) -> str:
@@ -363,6 +379,10 @@ def _linux_window_title(disp, window) -> str:
     fallback = _linux_fallback_wm_name(window)
     if fallback:
         return fallback
+
+    class_name = _linux_window_class(window)
+    if class_name:
+        return class_name
     return ""
 
 
@@ -395,6 +415,24 @@ def _linux_fallback_wm_name(window) -> str:
     if isinstance(name, bytes):
         return name.decode("utf-8", errors="ignore").strip()
     return str(name).strip()
+
+
+def _linux_window_class(window) -> str:
+    try:
+        wm_class = window.get_wm_class()
+    except Exception:
+        return ""
+    if not wm_class:
+        return ""
+    parts: list[str] = []
+    for entry in wm_class:
+        if not entry:
+            continue
+        if isinstance(entry, bytes):
+            parts.append(entry.decode("utf-8", errors="ignore"))
+        else:
+            parts.append(str(entry))
+    return " ".join(part for part in parts if part).strip()
 
 
 def _linux_window_geometry(window, root):
