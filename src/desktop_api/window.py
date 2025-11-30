@@ -317,7 +317,7 @@ def _linux_snapshot_window(disp, root, window_id, active_handle):
         title = _linux_window_title(disp, candidate)
         if not title:
             continue
-        geometry = _linux_window_geometry(candidate, root)
+        geometry = _linux_window_geometry(candidate, root, disp)
         if geometry is None:
             continue
         left, top, width, height = geometry
@@ -436,50 +436,95 @@ def _linux_window_class(window) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
-def _linux_window_geometry(window, root):
-    accumulated_x = 0
-    accumulated_y = 0
-    width = 0
-    height = 0
-    current = window
-    first = True
-    visited: set[int] = set()
+def _linux_window_geometry(window, root, disp=None):
+    if disp is None:
+        disp = _linux_display()
 
-    while True:
-        wid = int(getattr(current, "id", 0))
-        if wid in visited:
-            break
-        visited.add(wid)
-        try:
-            geom = current.get_geometry()
-        except Exception:
-            return None
-        if first:
-            width = int(geom.width)
-            height = int(geom.height)
-            first = False
-        accumulated_x += int(geom.x)
-        accumulated_y += int(geom.y)
-        try:
-            tree = current.query_tree()
-        except Exception:
-            break
-        parent = getattr(tree, "parent", None)
-        if parent is None:
-            break
-        parent_id = int(getattr(parent, "id", 0))
-        if parent_id == int(getattr(root, "id", 0)):
-            break
-        current = parent
+    # Get frame extents - these affect how we interpret geometry
+    net_extents = _linux_get_property_extents(disp, window, "_NET_FRAME_EXTENTS")
+    gtk_extents = _linux_get_property_extents(disp, window, "_GTK_FRAME_EXTENTS")
 
     try:
-        _, abs_x, abs_y = window.translate_coords(root, 0, 0)
-        accumulated_x = int(abs_x)
-        accumulated_y = int(abs_y)
+        geom = window.get_geometry()
     except Exception:
-        pass
+        return None
 
-    return accumulated_x, accumulated_y, width, height
+    width = int(geom.width)
+    height = int(geom.height)
+    border_width = int(getattr(geom, "border_width", 0))
+
+    # Get absolute position of the window
+    try:
+        result = window.translate_coords(root, 0, 0)
+        # translate_coords returns an object with x, y attributes (not a tuple)
+        left = int(-result.x)
+        top = int(-result.y)
+    except Exception:
+        # Fallback: walk up the window tree to accumulate position
+        left, top = 0, 0
+        current = window
+        visited: set[int] = set()
+        while True:
+            wid = int(getattr(current, "id", 0))
+            if wid in visited:
+                break
+            visited.add(wid)
+            try:
+                g = current.get_geometry()
+            except Exception:
+                break
+            left += int(g.x)
+            top += int(g.y)
+            try:
+                tree = current.query_tree()
+            except Exception:
+                break
+            parent = getattr(tree, "parent", None)
+            if parent is None or int(getattr(parent, "id", 0)) == int(getattr(root, "id", 0)):
+                break
+            current = parent
+
+    # Handle _GTK_FRAME_EXTENTS (CSD shadows)
+    # GTK frame extents indicate shadow area INCLUDED in the geometry
+    # We SUBTRACT them to get the actual visible content
+    if gtk_extents != (0, 0, 0, 0):
+        gtk_left, gtk_right, gtk_top, gtk_bottom = gtk_extents
+        left += gtk_left
+        top += gtk_top
+        width -= gtk_left + gtk_right
+        height -= gtk_top + gtk_bottom
+    # Handle _NET_FRAME_EXTENTS (SSD decorations) only if no GTK extents
+    # NET frame extents indicate decorations OUTSIDE the geometry
+    # We ADD them to include title bar/borders
+    elif net_extents != (0, 0, 0, 0):
+        net_left, net_right, net_top, net_bottom = net_extents
+        left -= net_left
+        top -= net_top
+        width += net_left + net_right
+        height += net_top + net_bottom
+
+    # Account for border width
+    width += 2 * border_width
+    height += 2 * border_width
+
+    return left, top, width, height
+
+
+def _linux_get_property_extents(disp, window, atom_name: str) -> tuple[int, int, int, int]:
+    """Get window extents (left, right, top, bottom) from an X property."""
+    atom = disp.intern_atom(atom_name, True)
+    if not atom:
+        return (0, 0, 0, 0)
+    try:
+        prop = window.get_full_property(atom, Xatom.CARDINAL)
+    except Exception:
+        return (0, 0, 0, 0)
+    if prop and prop.value and len(prop.value) >= 4:
+        try:
+            return (int(prop.value[0]), int(prop.value[1]), int(prop.value[2]), int(prop.value[3]))
+        except Exception:
+            pass
+    return (0, 0, 0, 0)
 
 
 def _linux_window_pid(disp, window) -> int | None:

@@ -49,8 +49,8 @@ def main() -> int:
     image.save(output_path)
     print(f"Saved screenshot to {output_path.resolve()}")
 
-    rel_x, rel_y = args.relative_click
-    controller.click(rel_x, rel_y, relative_to=target_window)
+    # rel_x, rel_y = args.relative_click
+    # controller.click(rel_x, rel_y, relative_to=target_window)
     # controller.type_text("Hello from desktop-api!\n")
     return 0
 
