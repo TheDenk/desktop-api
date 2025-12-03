@@ -172,6 +172,9 @@ class DesktopController:
         y: int | None = None,
         relative_to: WindowHandle | None = None,
     ) -> None:
+        if relative_to:
+            x = x if x is not None else relative_to.left + relative_to.width // 2
+            y = y if y is not None else relative_to.top + relative_to.height // 2
         actions.scroll(clicks, x=x, y=y, relative_to=relative_to)
 
     # Keyboard ---------------------------------------------------------
