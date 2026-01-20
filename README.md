@@ -25,8 +25,12 @@ Built on `pyautogui`, `pygetwindow`, and `mss`.
 ## Installation
 
 ```bash
+# Install from PyPI
+pip install desktop-api
+
+# Or install from source
 # Clone and install
-git clone https://github.com/your-repo/desktop-api.git
+git clone https://github.com/thedenk/desktop-api.git
 cd desktop-api
 
 python -m venv .venv
