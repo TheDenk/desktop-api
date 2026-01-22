@@ -30,13 +30,17 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "black>=24.3",
-  "ruff>=0.1"
+    "black>=24.3",
+    "ruff>=0.1",
+    "pytest>=7.0.0",
 ]
 mac = [
   "pyobjc-core>=12.0",
   "pyobjc-framework-Cocoa>=12.0",
   "pyobjc-framework-Quartz>=12.0"
+]
+unicode = [
+  "pyperclip>=1.8.2",
 ]
 
 [build-system]

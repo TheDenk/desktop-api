@@ -5,6 +5,7 @@ import sys
 from typing import Tuple
 
 import mss
+import pyautogui
 from PIL import Image
 
 from .window import WindowHandle, activate_window, refresh_window
@@ -33,6 +34,8 @@ def capture_region(region: Region | dict[str, int]) -> Image.Image:
     """Capture an arbitrary region defined by (left, top, width, height)."""
 
     left, top, width, height = _normalize_region(region)
+    # Clamp region to screen bounds to handle fullscreen windows
+    left, top, width, height = _clamp_region_to_screen(left, top, width, height)
     width = max(1, width)
     height = max(1, height)
     with mss.mss() as sct:
@@ -59,8 +62,13 @@ def capture_window(
         and window.handle is not None
         and padding == 0
     ):
-        mac_image = _capture_window_macos(window)
-        return mac_image.convert("RGB")
+        try:
+            mac_image = _capture_window_macos(window)
+            return mac_image.convert("RGB")
+        except (RuntimeError, Exception):
+            # Fall back to region-based capture if Quartz API fails
+            # (e.g., for fullscreen windows or other edge cases)
+            pass
 
     region = window.as_region()
     if padding:
@@ -80,6 +88,53 @@ def _normalize_region(region: Region | dict[str, int]) -> Region:
         region["width"],
         region["height"],
     )
+
+
+def _clamp_region_to_screen(left: int, top: int, width: int, height: int) -> Tuple[int, int, int, int]:
+    """Clamp region coordinates to screen bounds to handle fullscreen windows."""
+    screen_width, screen_height = pyautogui.size()
+    
+    # Calculate original right and bottom edges before clamping
+    original_right = left + width
+    original_bottom = top + height
+    
+    # Clamp left: if negative, clamp to 0 and preserve original right edge
+    # If beyond screen, clamp to screen edge
+    if left < 0:
+        # Negative left: clamp to 0, keep original right edge
+        left = 0
+        right = original_right
+    elif left >= screen_width:
+        # Beyond screen: clamp to screen edge
+        left = screen_width
+        right = screen_width
+    else:
+        # Normal case: calculate right from clamped left
+        right = original_right
+    
+    # Clamp top: same logic as left
+    if top < 0:
+        top = 0
+        bottom = original_bottom
+    elif top >= screen_height:
+        top = screen_height
+        bottom = screen_height
+    else:
+        bottom = original_bottom
+    
+    # Clamp right and bottom to screen bounds
+    right = min(right, screen_width)
+    bottom = min(bottom, screen_height)
+    
+    # Ensure right >= left and bottom >= top
+    right = max(left, right)
+    bottom = max(top, bottom)
+    
+    # Recalculate width and height from clamped coordinates
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    
+    return left, top, width, height
 
 
 def _capture_window_macos(window: WindowHandle) -> Image.Image:

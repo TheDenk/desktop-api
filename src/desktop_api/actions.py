@@ -1,9 +1,17 @@
 """High-level wrappers around pyautogui for basic desktop automation."""
 from __future__ import annotations
 
+import sys
+
 import pyautogui
 
 from .window import WindowHandle
+
+# Try to import pyperclip for Unicode support (optional dependency)
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None  # type: ignore[assignment]
 
 
 def move_mouse(
@@ -115,7 +123,43 @@ def scroll(
 
 
 def type_text(text: str, *, interval: float = 0.0) -> None:
-    pyautogui.write(text, interval=interval)
+    """Type text, using clipboard method for Unicode/Cyrillic characters.
+    
+    For ASCII-only text, uses direct keyboard typing (faster).
+    For Unicode/Cyrillic characters, uses clipboard + paste method.
+    """
+    # Check if text contains non-ASCII characters
+    if _has_unicode(text):
+        # Use clipboard + paste for Unicode characters
+        if pyperclip is None:
+            raise RuntimeError(
+                "Unicode/Cyrillic text requires pyperclip. "
+                "Install it with: pip install pyperclip"
+            )
+        
+        # Copy text to clipboard
+        pyperclip.copy(text)
+        
+        # Determine paste hotkey based on platform
+        if sys.platform == "darwin":
+            paste_key = "command"
+        else:
+            paste_key = "ctrl"
+        
+        # Paste the text (interval is ignored for paste as it's a single action)
+        pyautogui.hotkey(paste_key, "v")
+    else:
+        # Use direct typing for ASCII-only text (faster, respects interval)
+        pyautogui.write(text, interval=interval)
+
+
+def _has_unicode(text: str) -> bool:
+    """Check if text contains non-ASCII characters."""
+    try:
+        text.encode("ascii")
+        return False
+    except UnicodeEncodeError:
+        return True
 
 
 def send_hotkey(*keys: str, interval: float = 0.0) -> None:
